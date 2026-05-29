@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="ca">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Monitor de Temperatura · Raspberry Pi</title>
+  <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Syne:wght@400;700;800&display=swap" rel="stylesheet" />
+  <style>
+    /* ── Reset & variables ───────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #090d14;
+      --surface:  #0d1420;
+      --border:   #1a2840;
+      --accent:   #00d4ff;
+      --accent2:  #ff6b35;
+      --warm:     #ffb347;
+      --cold:     #4fc3f7;
+      --text:     #cdd9e8;
+      --muted:    #4a6080;
+      --font-ui:  'Syne', sans-serif;
+      --font-mono:'Share Tech Mono', monospace;
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-ui);
+      overflow-x: hidden;
+    }
+
+    /* ── Background grid ─────────────────────────────────────────── */
+    body::before {
+      content: '';
+      position: fixed; inset: 0; z-index: 0;
+      background-image:
+        linear-gradient(var(--border) 1px, transparent 1px),
+        linear-gradient(90deg, var(--border) 1px, transparent 1px);
+      background-size: 40px 40px;
+      opacity: .35;
+      pointer-events: none;
+    }
+
+    /* ── Layout ──────────────────────────────────────────────────── */
+    .wrapper {
+      position: relative; z-index: 1;
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 2rem 1.5rem 4rem;
+    }
+
+    /* ── Header ──────────────────────────────────────────────────── */
+    header {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 1rem;
+      margin-bottom: 2.5rem;
+      padding-bottom: 1.5rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: .75rem;
+    }
+    .logo-icon {
+      width: 42px; height: 42px;
+      border: 2px solid var(--accent);
+      border-radius: 8px;
+      display: grid;
+      place-items: center;
+      font-size: 1.4rem;
+    }
+    h1 {
+      font-size: 1.5rem;
+      font-weight: 800;
+      letter-spacing: -.02em;
+      line-height: 1.1;
+    }
+    h1 span { color: var(--accent); }
+    .subtitle {
+      font-family: var(--font-mono);
+      font-size: .7rem;
+      color: var(--muted);
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      margin-top: .2rem;
+    }
+
+    .status-pill {
+      display: flex;
+      align-items: center;
+      gap: .5rem;
+      font-family: var(--font-mono);
+      font-size: .72rem;
+      color: var(--muted);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: .35rem .85rem;
+      white-space: nowrap;
+    }
+    .dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--muted);
+    }
+    .dot.live { background: #22c55e; box-shadow: 0 0 6px #22c55e; animation: pulse 1.8s ease infinite; }
+    @keyframes pulse {
+      0%,100% { opacity: 1; }
+      50%      { opacity: .4; }
+    }
+
+    /* ── Hero cards ──────────────────────────────────────────────── */
+    .hero {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 1rem;
+      margin-bottom: 2rem;
+    }
+    @media (max-width: 640px) { .hero { grid-template-columns: 1fr; } }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.4rem 1.6rem;
+      position: relative;
+      overflow: hidden;
+      transition: border-color .2s;
+    }
+    .card::after {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 3px;
+    }
+    .card.current::after  { background: linear-gradient(90deg, var(--accent), #0080ff); }
+    .card.max::after      { background: linear-gradient(90deg, var(--accent2), var(--warm)); }
+    .card.min::after      { background: linear-gradient(90deg, var(--cold), #1565c0); }
+
+    .card-label {
+      font-family: var(--font-mono);
+      font-size: .65rem;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: .6rem;
+    }
+    .card-value {
+      font-size: 2.8rem;
+      font-weight: 800;
+      line-height: 1;
+      letter-spacing: -.03em;
+    }
+    .card.current .card-value { color: var(--accent); }
+    .card.max     .card-value { color: var(--accent2); }
+    .card.min     .card-value { color: var(--cold); }
+
+    .card-unit { font-size: 1.2rem; font-weight: 400; opacity: .6; }
+    .card-meta {
+      font-family: var(--font-mono);
+      font-size: .65rem;
+      color: var(--muted);
+      margin-top: .5rem;
+    }
+
+    /* ── Chart ───────────────────────────────────────────────────── */
+    .chart-section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.4rem 1.6rem 1rem;
+      margin-bottom: 2rem;
+    }
+    .section-title {
+      font-size: .75rem;
+      font-family: var(--font-mono);
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 1rem;
+    }
+
+    #chart-canvas {
+      width: 100%;
+      height: 220px;
+      display: block;
+    }
+
+    /* ── Table ───────────────────────────────────────────────────── */
+    .table-section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.4rem 1.6rem;
+    }
+    .table-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 1rem;
+    }
+    #record-count {
+      font-family: var(--font-mono);
+      font-size: .7rem;
+      color: var(--muted);
+    }
+
+    .data-table { width: 100%; border-collapse: collapse; }
+    .data-table thead th {
+      font-family: var(--font-mono);
+      font-size: .65rem;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      color: var(--muted);
+      padding: .5rem .75rem;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+    }
+    .data-table tbody tr {
+      border-bottom: 1px solid #11192a;
+      transition: background .15s;
+    }
+    .data-table tbody tr:hover { background: #111d2e; }
+    .data-table tbody tr:first-child td { color: var(--accent); }
+
+    .data-table td {
+      padding: .55rem .75rem;
+      font-family: var(--font-mono);
+      font-size: .8rem;
+    }
+    .temp-cell { font-weight: 700; }
+    .temp-bar {
+      display: inline-block;
+      height: 6px;
+      border-radius: 3px;
+      margin-left: .6rem;
+      vertical-align: middle;
+      background: var(--accent);
+      opacity: .5;
+      transition: width .4s ease;
+    }
+
+    /* ── Footer ──────────────────────────────────────────────────── */
+    footer {
+      text-align: center;
+      margin-top: 3rem;
+      font-family: var(--font-mono);
+      font-size: .65rem;
+      color: var(--muted);
+    }
+
+    /* ── Loading / Error ─────────────────────────────────────────── */
+    #message {
+      text-align: center;
+      font-family: var(--font-mono);
+      color: var(--muted);
+      padding: 3rem 0;
+    }
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+<div class="wrapper">
+
+  <!-- Header -->
+  <header>
+    <div class="logo">
+      <div class="logo-icon">🌡</div>
+      <div>
+        <h1>Temperatura <span>DS18B20</span></h1>
+        <p class="subtitle">Raspberry Pi · Sensor impermeable</p>
+      </div>
+    </div>
+    <div class="status-pill">
+      <span class="dot" id="status-dot"></span>
+      <span id="status-text">Carregant…</span>
+    </div>
+  </header>
+
+  <!-- Hero cards -->
+  <div class="hero">
+    <div class="card current">
+      <div class="card-label">Temperatura actual</div>
+      <div class="card-value" id="val-current">—<span class="card-unit">°C</span></div>
+      <div class="card-meta" id="val-time">—</div>
+    </div>
+    <div class="card max">
+      <div class="card-label">Màxima registrada</div>
+      <div class="card-value" id="val-max">—<span class="card-unit">°C</span></div>
+      <div class="card-meta" id="val-max-time">—</div>
+    </div>
+    <div class="card min">
+      <div class="card-label">Mínima registrada</div>
+      <div class="card-value" id="val-min">—<span class="card-unit">°C</span></div>
+      <div class="card-meta" id="val-min-time">—</div>
+    </div>
+  </div>
+
+  <!-- Chart -->
+  <div class="chart-section">
+    <div class="section-title">Evolució de temperatura (últims 60 registres)</div>
+    <canvas id="chart-canvas"></canvas>
+  </div>
+
+  <!-- Table -->
+  <div class="table-section">
+    <div class="table-header">
+      <div class="section-title" style="margin-bottom:0">Historial de lectures</div>
+      <span id="record-count"></span>
+    </div>
+    <div id="message">Carregant dades…</div>
+    <table class="data-table hidden" id="data-table">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Data i hora (UTC)</th>
+          <th>Temperatura</th>
+          <th>Indicador</th>
+        </tr>
+      </thead>
+      <tbody id="table-body"></tbody>
+    </table>
+  </div>
+
+  <footer>
+    Font: github.com/abelber07/raspberry · temperatures.json &nbsp;|&nbsp;
+    Actualització automàtica cada 60 s
+  </footer>
+
+</div>
+
+<script>
+/* ─────────────────────────────────────────────────────────────────────
+   Configuració
+   ───────────────────────────────────────────────────────────────────── */
+const GITHUB_RAW_URL =
+  "https://raw.githubusercontent.com/abelber07/raspberry/main/temperatures.json";
+
+const REFRESH_MS = 60_000; // actualitza cada 60 s
+
+/* ─────────────────────────────────────────────────────────────────────
+   Helpers
+   ───────────────────────────────────────────────────────────────────── */
+function fmt(isoStr) {
+  const d = new Date(isoStr);
+  return d.toLocaleString("ca-ES", {
+    day: "2-digit", month: "2-digit", year: "numeric",
+    hour: "2-digit", minute: "2-digit", second: "2-digit",
+    timeZone: "UTC",
+  }) + " UTC";
+}
+
+function setStatus(live, text) {
+  document.getElementById("status-dot").className = "dot" + (live ? " live" : "");
+  document.getElementById("status-text").textContent = text;
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+   Canvas chart (sense llibreries externes)
+   ───────────────────────────────────────────────────────────────────── */
+function drawChart(records) {
+  const canvas = document.getElementById("chart-canvas");
+  const dpr = window.devicePixelRatio || 1;
+  const W = canvas.offsetWidth;
+  const H = canvas.offsetHeight;
+  canvas.width  = W * dpr;
+  canvas.height = H * dpr;
+  const ctx = canvas.getContext("2d");
+  ctx.scale(dpr, dpr);
+
+  const last60 = records.slice(-60);
+  if (last60.length < 2) return;
+
+  const temps = last60.map(r => r.temperature_c);
+  const tMin  = Math.min(...temps) - 1;
+  const tMax  = Math.max(...temps) + 1;
+  const PAD   = { top: 16, right: 16, bottom: 32, left: 44 };
+  const cW    = W - PAD.left - PAD.right;
+  const cH    = H - PAD.top  - PAD.bottom;
+
+  const xPos = i => PAD.left + (i / (last60.length - 1)) * cW;
+  const yPos = t => PAD.top  + (1 - (t - tMin) / (tMax - tMin)) * cH;
+
+  // Grid lines
+  ctx.strokeStyle = "#1a2840";
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    const y = PAD.top + (i / 4) * cH;
+    ctx.beginPath();
+    ctx.moveTo(PAD.left, y);
+    ctx.lineTo(PAD.left + cW, y);
+    ctx.stroke();
+    const label = (tMax - (i / 4) * (tMax - tMin)).toFixed(1) + "°";
+    ctx.fillStyle = "#4a6080";
+    ctx.font = `${10}px 'Share Tech Mono', monospace`;
+    ctx.textAlign = "right";
+    ctx.fillText(label, PAD.left - 6, y + 4);
+  }
+
+  // Area gradient
+  const grad = ctx.createLinearGradient(0, PAD.top, 0, PAD.top + cH);
+  grad.addColorStop(0,   "rgba(0,212,255,.25)");
+  grad.addColorStop(1,   "rgba(0,212,255,0)");
+
+  ctx.beginPath();
+  ctx.moveTo(xPos(0), yPos(temps[0]));
+  for (let i = 1; i < last60.length; i++) ctx.lineTo(xPos(i), yPos(temps[i]));
+  ctx.lineTo(xPos(last60.length - 1), PAD.top + cH);
+  ctx.lineTo(xPos(0), PAD.top + cH);
+  ctx.closePath();
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  // Line
+  ctx.beginPath();
+  ctx.strokeStyle = "#00d4ff";
+  ctx.lineWidth = 2;
+  ctx.lineJoin = "round";
+  ctx.moveTo(xPos(0), yPos(temps[0]));
+  for (let i = 1; i < last60.length; i++) ctx.lineTo(xPos(i), yPos(temps[i]));
+  ctx.stroke();
+
+  // Last point dot
+  ctx.beginPath();
+  ctx.arc(xPos(last60.length - 1), yPos(temps[temps.length - 1]), 5, 0, Math.PI * 2);
+  ctx.fillStyle = "#00d4ff";
+  ctx.fill();
+
+  // X-axis labels (each 10th)
+  ctx.fillStyle = "#4a6080";
+  ctx.font = `${10}px 'Share Tech Mono', monospace`;
+  ctx.textAlign = "center";
+  for (let i = 0; i < last60.length; i += Math.max(1, Math.floor(last60.length / 6))) {
+    const d = new Date(last60[i].timestamp);
+    const lbl = d.toISOString().slice(11, 16);
+    ctx.fillText(lbl, xPos(i), PAD.top + cH + 20);
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+   Taula
+   ───────────────────────────────────────────────────────────────────── */
+function renderTable(records) {
+  const tbody = document.getElementById("table-body");
+  const sorted = [...records].reverse();
+  const temps  = records.map(r => r.temperature_c);
+  const tMin   = Math.min(...temps);
+  const tMax   = Math.max(...temps);
+  const range  = tMax - tMin || 1;
+
+  tbody.innerHTML = sorted.map((r, idx) => {
+    const pct = ((r.temperature_c - tMin) / range * 80 + 10).toFixed(1);
+    const color = r.temperature_c >= 30 ? "var(--accent2)"
+                : r.temperature_c <= 5  ? "var(--cold)"
+                : "var(--accent)";
+    return `<tr>
+      <td>${sorted.length - idx}</td>
+      <td>${fmt(r.timestamp)}</td>
+      <td class="temp-cell" style="color:${color}">${r.temperature_c.toFixed(2)} °C</td>
+      <td><span class="temp-bar" style="width:${pct}px;background:${color}"></span></td>
+    </tr>`;
+  }).join("");
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+   Fetch & render
+   ───────────────────────────────────────────────────────────────────── */
+async function loadData() {
+  try {
+    const res = await fetch(GITHUB_RAW_URL + "?ts=" + Date.now());
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const records = await res.json();
+
+    if (!Array.isArray(records) || records.length === 0) {
+      setStatus(false, "Sense dades");
+      document.getElementById("message").textContent = "El fitxer JSON és buit o no té el format esperat.";
+      return;
+    }
+
+    // Sort per si fos necessari
+    records.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+
+    const temps    = records.map(r => r.temperature_c);
+    const last     = records[records.length - 1];
+    const maxRec   = records.reduce((a, b) => b.temperature_c > a.temperature_c ? b : a);
+    const minRec   = records.reduce((a, b) => b.temperature_c < a.temperature_c ? b : a);
+
+    // Hero cards
+    document.getElementById("val-current").innerHTML =
+      `${last.temperature_c.toFixed(2)}<span class="card-unit"> °C</span>`;
+    document.getElementById("val-time").textContent = fmt(last.timestamp);
+
+    document.getElementById("val-max").innerHTML =
+      `${maxRec.temperature_c.toFixed(2)}<span class="card-unit"> °C</span>`;
+    document.getElementById("val-max-time").textContent = fmt(maxRec.timestamp);
+
+    document.getElementById("val-min").innerHTML =
+      `${minRec.temperature_c.toFixed(2)}<span class="card-unit"> °C</span>`;
+    document.getElementById("val-min-time").textContent = fmt(minRec.timestamp);
+
+    // Record count
+    document.getElementById("record-count").textContent =
+      `${records.length} registres`;
+
+    // Chart
+    drawChart(records);
+
+    // Table
+    document.getElementById("message").classList.add("hidden");
+    const table = document.getElementById("data-table");
+    table.classList.remove("hidden");
+    renderTable(records);
+
+    // Status
+    const secsAgo = Math.round((Date.now() - new Date(last.timestamp).getTime()) / 1000);
+    setStatus(secsAgo < 120, secsAgo < 60 ? "En viu" : `Última lectura fa ${secsAgo}s`);
+
+  } catch (err) {
+    setStatus(false, "Error de connexió");
+    document.getElementById("message").textContent =
+      `No s'han pogut carregar les dades: ${err.message}`;
+    console.error(err);
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+   Init
+   ───────────────────────────────────────────────────────────────────── */
+loadData();
+setInterval(loadData, REFRESH_MS);
+
+window.addEventListener("resize", () => {
+  // Redraw chart on resize
+  fetch(GITHUB_RAW_URL + "?ts=" + Date.now())
+    .then(r => r.json())
+    .then(records => { if (Array.isArray(records)) drawChart(records); })
+    .catch(() => {});
+});
+</script>
+</body>
+</html>
