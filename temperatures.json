@@ -74,5 +74,9 @@
   {
     "timestamp": "2026-05-29T12:35:04Z",
     "temperature_c": 28.19
+  },
+  {
+    "timestamp": "2026-05-29T12:35:36Z",
+    "temperature_c": 28.06
   }
 ]
